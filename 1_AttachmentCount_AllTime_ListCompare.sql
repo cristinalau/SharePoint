@@ -2,9 +2,9 @@
    Purpose:
      - Count occurrences of URL-based attachments and URL text references across multiple
        ENTITY types (ASSET, CONDITIONS, WORKORDERS, PROJECT, etc.).
-     - This version removes the 24?month timeframe completely.
-     - URL matching now uses CONTAINS matching:
-           filename LIKE '%' || prefix || '%'
+     - This version removes the 24-month timeframe completely.
+     - URL matching now uses case-insensitive CONTAINS matching:
+           LOWER(field) LIKE '%' || LOWER(prefix) || '%'
      - URL prefix list is controlled via url_prefixes CTE.
    ============================================================================================ */
 
@@ -82,8 +82,8 @@ url_prefixes AS (
    ======================================================== */
 unioned AS (
 
-    /* ================================================================================ 
-       URL ATTACHMENTS  NON-EMBEDDED
+    /* ================================================================================
+       URL ATTACHMENTS - NON-EMBEDDED
        ================================================================================ */
 
     SELECT 'ASSET' AS entity,
@@ -93,8 +93,11 @@ unioned AS (
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
                AND NVL(c.embedded,0) = 0
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE c.filename LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            ) AS count_value
       FROM dual
 
@@ -108,8 +111,11 @@ unioned AS (
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
                AND c.embedded = 1
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE c.filename LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -123,8 +129,11 @@ unioned AS (
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
                AND NVL(c.embedded,0) = 0
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE c.filename LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -138,8 +147,11 @@ unioned AS (
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
                AND NVL(c.embedded,0) = 0
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE c.filename LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -153,8 +165,11 @@ unioned AS (
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
                AND NVL(c.embedded,0) = 0
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE c.filename LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -168,8 +183,11 @@ unioned AS (
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
                AND NVL(c.embedded,0) = 0
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE c.filename LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -183,8 +201,11 @@ unioned AS (
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
                AND NVL(c.embedded,0) = 0
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE c.filename LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -199,8 +220,11 @@ unioned AS (
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
                AND NVL(c.embedded,0) = 0
                AND a.wostatus IN (1,3,4,6,30,50,70)
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE c.filename LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -216,8 +240,11 @@ unioned AS (
              WHERE wo.site_oi IN (SELECT site_oi FROM sites)
                AND NVL(c.embedded,0) = 0
                AND wo.wostatus IN (1,3,4,6,30,50,70)
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE c.filename LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -232,12 +259,15 @@ unioned AS (
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
                AND NVL(c.embedded,0) = 0
                AND a.wrstatus IN (1,2,3,6)
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE c.filename LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
-    /* TEXT FIELDS  CONTAINS MATCH */
+    /* TEXT FIELDS - CONTAINS MATCH */
     UNION ALL
 
     /* ASSET (image) */
@@ -245,8 +275,11 @@ unioned AS (
            (SELECT COUNT(*)
               FROM mnt.asset a
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE a.image LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.image) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -257,8 +290,11 @@ unioned AS (
            (SELECT COUNT(*)
               FROM mnt.standardtask a
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE a.longdescript LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.longdescript) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -269,8 +305,11 @@ unioned AS (
            (SELECT COUNT(*)
               FROM mnt.standardjob a
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE a.longdescript LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.longdescript) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -282,8 +321,11 @@ unioned AS (
               FROM mnt.workrequest a
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
                AND a.wrstatus IN (1,2,3,6)
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE a.longdescript LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.longdescript) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -296,8 +338,11 @@ unioned AS (
               JOIN mnt.workorders wo ON a.workorder_oi = wo.workordersoi
              WHERE wo.site_oi IN (SELECT site_oi FROM sites)
                AND wo.wostatus IN (1,3,4,6,30,50,70)
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE a.longdescript LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.longdescript) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -310,8 +355,11 @@ unioned AS (
               JOIN mnt.workrequest wr ON a.workrequest_oi = wr.workrequestoi
              WHERE wr.site_oi IN (SELECT site_oi FROM sites)
                AND wr.wrstatus IN (1,2,3,6)
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE a.commen LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.commen) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -324,8 +372,11 @@ unioned AS (
               JOIN customerdata.epworkordermilesto e ON e.workorders_oi = wo.workordersoi
              WHERE wo.site_oi IN (SELECT site_oi FROM sites)
                AND wo.wostatus IN (1,3,4,6,30,50,70)
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE e.mscomment LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(e.mscomment) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -339,8 +390,11 @@ unioned AS (
               JOIN mnt.workorders w ON wot.workorder_oi = w.workordersoi
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
                AND w.wostatus IN (1,3,4,6,30,50,70)
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE a.taskcomment LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.taskcomment) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -353,10 +407,11 @@ unioned AS (
               JOIN customerdata.eprecommendations e ON e.asset_oi = a.assetoi
              WHERE a.site_oi IN (SELECT site_oi FROM sites)
                AND EXISTS (
-                     SELECT 1 FROM url_prefixes u
-                      WHERE e.epprojectsha LIKE '%' || u.url_pref || '%'
-                         OR e.epdescriptio LIKE '%' || u.url_pref || '%'
-               )
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(e.epprojectsha) LIKE '%' || LOWER(u.url_pref) || '%'
+                         OR LOWER(e.epdescriptio) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -388,8 +443,11 @@ unioned AS (
                       WHERE parent_oi = a.assetoi
                         AND child_oi  = 11
                    )
-               AND EXISTS (SELECT 1 FROM url_prefixes u
-                            WHERE s3.docmgmtfile LIKE '%' || u.url_pref || '%')
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(s3.docmgmtfile) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 )
