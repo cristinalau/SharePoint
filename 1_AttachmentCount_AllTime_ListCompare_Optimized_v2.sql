@@ -2,32 +2,13 @@
    Purpose:
      - Count occurrences of URL-based attachments and URL text references across multiple
        ENTITY types (ASSET, CONDITIONS, WORKORDERS, PROJECT, etc.).
-     - This version removes the 24?month timeframe completely.
-     - URL matching now uses normalized, case-insensitive URL matching.
-     - It handles all three requested improvements:
-           * case-insensitive matching
-           * partial URL matching (query params, fragments, trailing slashes)
-           * domain-level matching when the same site/domain appears
-     - It is also optimized to run faster by:
-           * normalizing the URL list once in a small CTE
-           * using INSTR instead of LIKE for substring checks
-           * materializing the small lookup CTEs before scanning large tables
+     - Includes ALL sites (site filter removed).
+     - URL matching uses case-insensitive CONTAINS matching:
+           LOWER(field) LIKE '%' || LOWER(prefix) || '%'
      - URL prefix list is controlled via url_prefixes CTE.
    ============================================================================================ */
 
 WITH
-
-/* ------------------------------
-   Site Scope (Water + Drainage)
-   ------------------------------ */
-sites AS (
-    SELECT 107 AS site_oi FROM dual UNION ALL
-    SELECT 58  FROM dual UNION ALL
-    SELECT 50  FROM dual UNION ALL
-    SELECT 30  FROM dual UNION ALL
-    SELECT 40  FROM dual UNION ALL
-    SELECT 38  FROM dual
-),
 
 /* -------------------------------------------------------
    URL Prefix List
@@ -84,73 +65,13 @@ url_prefixes AS (
     SELECT 'https://extranet.epcor.ca/water/WWCDS' FROM dual
 ),
 
-/* -------------------------------------------------------
-   Normalized URL Terms
-   -------------------------------------------------------
-   Build a small, reusable lookup table of match terms once.
-   Matching rules:
-     1) Case-insensitive: all values are LOWER(...)
-     2) Partial URL aware: strips query strings, fragments, and trailing slashes
-     3) Domain aware: also matches by domain alone when needed
-
-   Why this is faster:
-     - The URL list is normalized once, not inside every table scan
-     - INSTR(...) is generally lighter than LIKE '%...%'
-     - MATERIALIZE encourages Oracle to cache the small lookup CTE
-   ------------------------------------------------------- */
-url_normalized AS (
-    SELECT /*+ MATERIALIZE */
-           LOWER(TRIM(url_pref)) AS original_url,
-           LOWER(REGEXP_REPLACE(TRIM(url_pref), '[?#].*$', '')) AS no_query_fragment,
-           LOWER(REGEXP_REPLACE(REGEXP_REPLACE(TRIM(url_pref), '[?#].*$', ''), '/+$', '')) AS no_trailing_slash,
-           LOWER(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(TRIM(url_pref), '[?#].*$', ''), '/+$', ''), '^https?://', '')) AS no_scheme,
-           LOWER(REGEXP_SUBSTR(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(TRIM(url_pref), '[?#].*$', ''), '/+$', ''), '^https?://', ''), '^[^/]+')) AS host_full,
-           LOWER(REGEXP_SUBSTR(REGEXP_SUBSTR(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(TRIM(url_pref), '[?#].*$', ''), '/+$', ''), '^https?://', ''), '^[^/]+'), '^[^.]+')) AS host_short,
-           LOWER(REGEXP_SUBSTR(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(TRIM(url_pref), '[?#].*$', ''), '/+$', ''), '^https?://', ''), '/.*$')) AS path_only
-      FROM url_prefixes
-),
-url_match_terms AS (
-    SELECT /*+ MATERIALIZE */ DISTINCT match_term
-      FROM (
-            /* Exact full URL */
-            SELECT original_url AS match_term
-              FROM url_normalized
-             WHERE original_url IS NOT NULL
-               AND original_url <> ''
-
-            UNION ALL
-
-            /* Same URL without query strings/fragments/trailing slashes */
-            SELECT no_scheme AS match_term
-              FROM url_normalized
-             WHERE no_scheme IS NOT NULL
-               AND no_scheme <> ''
-
-            UNION ALL
-
-            /* Full host name, e.g. epcorweb.epcor.ca */
-            SELECT host_full AS match_term
-              FROM url_normalized
-             WHERE host_full IS NOT NULL
-               AND host_full <> ''
-
-            UNION ALL
-
-            /* Short host token fallback, e.g. epcorweb or extranet */
-            SELECT host_short AS match_term
-              FROM url_normalized
-             WHERE host_short IS NOT NULL
-               AND host_short <> ''
-           )
-)
-
 /* ========================================================
    UNION of all entity-specific URL-based counts
    ======================================================== */
 unioned AS (
 
-    /* ================================================================================ 
-       URL ATTACHMENTS  NON-EMBEDDED
+    /* ================================================================================
+       URL ATTACHMENTS - NON-EMBEDDED
        ================================================================================ */
 
     SELECT 'ASSET' AS entity,
@@ -158,10 +79,12 @@ unioned AS (
               FROM mnt.asset a
               JOIN oq.attcontainter b ON a.attachmentco_oi = b.attachmentcontaineroi
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND NVL(c.embedded,0) = 0
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(c.filename), u.match_term) > 0)
+             WHERE NVL(c.embedded,0) = 0
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            ) AS count_value
       FROM dual
 
@@ -173,10 +96,12 @@ unioned AS (
               FROM mnt.asset a
               JOIN oq.attcontainter b ON a.attachmentco_oi = b.attachmentcontaineroi
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND c.embedded = 1
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(c.filename), u.match_term) > 0)
+             WHERE c.embedded = 1
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -188,10 +113,12 @@ unioned AS (
               FROM mnt.conditionindicator a
               JOIN oq.attcontainter b ON a.attachmentco_oi = b.attachmentcontaineroi
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND NVL(c.embedded,0) = 0
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(c.filename), u.match_term) > 0)
+             WHERE NVL(c.embedded,0) = 0
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -203,10 +130,12 @@ unioned AS (
               FROM mnt.indicatorreading a
               JOIN oq.attcontainter b ON a.attachmentco_oi = b.attachmentcontaineroi
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND NVL(c.embedded,0) = 0
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(c.filename), u.match_term) > 0)
+             WHERE NVL(c.embedded,0) = 0
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -218,10 +147,12 @@ unioned AS (
               FROM mnt.mtceschedule a
               JOIN oq.attcontainter b ON a.attachmentco_oi = b.attachmentcontaineroi
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND NVL(c.embedded,0) = 0
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(c.filename), u.match_term) > 0)
+             WHERE NVL(c.embedded,0) = 0
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -233,10 +164,12 @@ unioned AS (
               FROM mnt.project a
               JOIN oq.attcontainter b ON a.attachmentco_oi = b.attachmentcontaineroi
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND NVL(c.embedded,0) = 0
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(c.filename), u.match_term) > 0)
+             WHERE NVL(c.embedded,0) = 0
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -248,10 +181,12 @@ unioned AS (
               FROM mnt.standardtask a
               JOIN oq.attcontainter b ON a.attachmentco_oi = b.attachmentcontaineroi
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND NVL(c.embedded,0) = 0
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(c.filename), u.match_term) > 0)
+             WHERE NVL(c.embedded,0) = 0
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -263,11 +198,13 @@ unioned AS (
               FROM mnt.workorders a
               JOIN oq.attcontainter b ON a.attachmentco_oi = b.attachmentcontaineroi
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND NVL(c.embedded,0) = 0
+             WHERE NVL(c.embedded,0) = 0
                AND a.wostatus IN (1,3,4,6,30,50,70)
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(c.filename), u.match_term) > 0)
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -280,11 +217,13 @@ unioned AS (
               JOIN oq.attcontainter b ON a.attachmentco_oi = b.attachmentcontaineroi
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
               JOIN mnt.workorders wo ON a.workorder_oi = wo.workordersoi
-             WHERE wo.site_oi IN (SELECT site_oi FROM sites)
-               AND NVL(c.embedded,0) = 0
+             WHERE NVL(c.embedded,0) = 0
                AND wo.wostatus IN (1,3,4,6,30,50,70)
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(c.filename), u.match_term) > 0)
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -296,24 +235,28 @@ unioned AS (
               FROM mnt.workrequest a
               JOIN oq.attcontainter b ON a.attachmentco_oi = b.attachmentcontaineroi
               JOIN oq.attachment c ON b.attachmentcontaineroi = c.attcontainer_oi
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND NVL(c.embedded,0) = 0
+             WHERE NVL(c.embedded,0) = 0
                AND a.wrstatus IN (1,2,3,6)
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(c.filename), u.match_term) > 0)
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(c.filename) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
-    /* TEXT FIELDS  CONTAINS MATCH */
+    /* TEXT FIELDS - CONTAINS MATCH */
     UNION ALL
 
     /* ASSET (image) */
     SELECT 'ASSET',
            (SELECT COUNT(*)
               FROM mnt.asset a
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(a.image), u.match_term) > 0)
+             WHERE EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.image) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -323,9 +266,11 @@ unioned AS (
     SELECT 'STANDARDTASK',
            (SELECT COUNT(*)
               FROM mnt.standardtask a
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(a.longdescript), u.match_term) > 0)
+             WHERE EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.longdescript) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -335,9 +280,11 @@ unioned AS (
     SELECT 'STANDARDJOB',
            (SELECT COUNT(*)
               FROM mnt.standardjob a
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(a.longdescript), u.match_term) > 0)
+             WHERE EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.longdescript) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -347,10 +294,12 @@ unioned AS (
     SELECT 'WORKREQUEST',
            (SELECT COUNT(*)
               FROM mnt.workrequest a
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND a.wrstatus IN (1,2,3,6)
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(a.longdescript), u.match_term) > 0)
+             WHERE a.wrstatus IN (1,2,3,6)
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.longdescript) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -361,10 +310,12 @@ unioned AS (
            (SELECT COUNT(*)
               FROM mnt.workordertask a
               JOIN mnt.workorders wo ON a.workorder_oi = wo.workordersoi
-             WHERE wo.site_oi IN (SELECT site_oi FROM sites)
-               AND wo.wostatus IN (1,3,4,6,30,50,70)
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(a.longdescript), u.match_term) > 0)
+             WHERE wo.wostatus IN (1,3,4,6,30,50,70)
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.longdescript) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -375,10 +326,12 @@ unioned AS (
            (SELECT COUNT(*)
               FROM mnt.workrequestcomment a
               JOIN mnt.workrequest wr ON a.workrequest_oi = wr.workrequestoi
-             WHERE wr.site_oi IN (SELECT site_oi FROM sites)
-               AND wr.wrstatus IN (1,2,3,6)
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(a.commen), u.match_term) > 0)
+             WHERE wr.wrstatus IN (1,2,3,6)
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.commen) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -389,10 +342,12 @@ unioned AS (
            (SELECT COUNT(*)
               FROM mnt.workorders wo
               JOIN customerdata.epworkordermilesto e ON e.workorders_oi = wo.workordersoi
-             WHERE wo.site_oi IN (SELECT site_oi FROM sites)
-               AND wo.wostatus IN (1,3,4,6,30,50,70)
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(e.mscomment), u.match_term) > 0)
+             WHERE wo.wostatus IN (1,3,4,6,30,50,70)
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(e.mscomment) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -404,10 +359,12 @@ unioned AS (
               FROM mnt.activityreport a
               JOIN mnt.workordertask wot ON a.wotask_oi = wot.workordertaskoi
               JOIN mnt.workorders w ON wot.workorder_oi = w.workordersoi
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND w.wostatus IN (1,3,4,6,30,50,70)
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(a.taskcomment), u.match_term) > 0)
+             WHERE w.wostatus IN (1,3,4,6,30,50,70)
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(a.taskcomment) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -418,13 +375,12 @@ unioned AS (
            (SELECT COUNT(*)
               FROM mnt.asset a
               JOIN customerdata.eprecommendations e ON e.asset_oi = a.assetoi
-             WHERE a.site_oi IN (SELECT site_oi FROM sites)
-               AND EXISTS (
+             WHERE EXISTS (
                      SELECT 1
-                       FROM url_match_terms u
-                      WHERE INSTR(LOWER(e.epprojectsha), u.match_term) > 0
-                         OR INSTR(LOWER(e.epdescriptio), u.match_term) > 0
-               )
+                       FROM url_prefixes u
+                      WHERE LOWER(e.epprojectsha) LIKE '%' || LOWER(u.url_pref) || '%'
+                         OR LOWER(e.epdescriptio) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 
@@ -456,15 +412,15 @@ unioned AS (
                       WHERE parent_oi = a.assetoi
                         AND child_oi  = 11
                    )
-               AND EXISTS (SELECT 1 FROM url_match_terms u
-                            WHERE INSTR(LOWER(s3.docmgmtfile), u.match_term) > 0)
+               AND EXISTS (
+                     SELECT 1
+                       FROM url_prefixes u
+                      WHERE LOWER(s3.docmgmtfile) LIKE '%' || LOWER(u.url_pref) || '%'
+                   )
            )
       FROM dual
 )
 
-/* ===============================
-   FINAL ROLLUP BY ENTITY
-   =============================== */
 SELECT entity,
        SUM(count_value) AS total_count
   FROM unioned
